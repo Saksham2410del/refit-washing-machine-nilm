@@ -1,0 +1,32 @@
+,value
+files,2
+rows,8518763
+first_reading,2013-10-09 14:06:17+01:00
+last_reading,2015-07-10 11:56:32+01:00
+unparseable_unix,0
+unparseable_datetime_text,0
+datetime_text_off_by_over_1s,0
+rows_in_repeated_autumn_hour,2185
+out_of_order_rows,2
+largest_backward_jump_s,8220558.0
+duplicate_timestamps,1211048
+duplicates_identical_values,884707
+duplicates_different_values,326341
+median_interval_s,7.0
+intervals_6_to_10s_pct,53.16
+intervals_under_6s_pct,32.25
+gaps_over_1min,4040
+gaps_over_5min,390
+gaps_over_1h,21
+gaps_over_1day,12
+unique_timestamps,7306138
+values_removed_negative_or_over_limit,3276
+aggregate_zero_set_missing,8
+mean_readings_per_minute,8.87
+minutes_total,920031
+minutes_filled_short_gap,853
+minutes_outage,114398
+outage_pct,12.43
+outage_periods,375
+outage_periods_over_1h,21
+longest_outage_days,41.6

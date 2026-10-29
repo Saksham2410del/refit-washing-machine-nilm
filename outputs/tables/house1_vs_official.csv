@@ -1,0 +1,11 @@
+channel,minutes_compared,mae_w,within_10w_pct,corr
+Aggregate,803498,9.1,93.6,0.991
+Appliance1,802320,0.4,99.3,0.992
+Appliance2,801540,0.4,98.9,0.979
+Appliance3,802094,0.4,99.1,0.993
+Appliance4,803029,0.2,99.9,0.973
+Appliance5,797426,0.6,99.5,0.991
+Appliance6,802659,0.3,99.9,0.996
+Appliance7,803508,0.0,99.9,0.996
+Appliance8,802625,0.1,99.8,0.99
+Appliance9,707436,0.4,99.6,0.999

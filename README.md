@@ -1,174 +1,168 @@
-# REFIT: data cleaning and washing-machine disaggregation
+# REFIT washing machine disaggregation
 
-Take-home assignment for Flock Energy. Three scripts take the REFIT data from raw files to an evaluated model:
+This project cleans raw REFIT smart meter data, looks at how five UK homes use their washing machines, and estimates washing machine power from the whole-house reading at 1-minute resolution.
 
-1. `src/clean_house1.py` audits the raw House 1 data (timestamps, duplicates, gaps, impossible values), cleans it and resamples it to 1 minute.
-2. `src/eda_washing_machine.py` analyses washing-machine use in Houses 1, 2, 3, 5 and 11 from the official cleaned data: data quality, a cycle detection rule, cycle statistics and when people wash.
-3. `src/train_disaggregation.py` estimates washing-machine power from the whole-house aggregate at 1-minute resolution with LightGBM. It compares the model with two simple baselines on later months of known homes and on homes the model has never seen.
+## What I built
 
-Write-ups:
+There are three Python scripts. Together they run end to end, from the REFIT files to cleaned data, EDA, model predictions and evaluation.
 
-- [DATA.md](DATA.md): raw data audit, timestamps, cleaning steps, gap and outlier decisions, remaining concerns
-- [RESULTS.md](RESULTS.md): washing-machine EDA, model results, validation, failure cases
-- [Recommendation.md](Recommendation.md): one-page summary for a utility, plus the Section 4 answers
+1. `src/clean_house1.py` audits the raw House 1 data: timestamp parsing and ordering, duplicates, missing readings, irregular intervals and impossible values. It then cleans the data, resamples it to 1 minute, and plots it before and after cleaning.
+2. `src/eda_washing_machine.py` analyses the washing machine channel in the official cleaned data for Houses 1, 2, 3, 5 and 11. It covers availability and data quality, a cycle detection rule, cycle statistics, and usage by hour of day and day of week.
+3. `src/train_disaggregation.py` trains a LightGBM model that estimates washing machine power from the aggregate signal. It compares the model with two baselines, on a time split and on houses the model has never seen, and then looks at where it fails.
 
-## Results in short
+`src/common.py` holds the shared code: file loading, timestamp handling and the cycle rule. Figures and tables are saved to `outputs/`.
 
-- **Raw House 1.** The raw data has 8.5 million rows in two overlapping files. It contains 1.2 million duplicate timestamps, 3,276 impossible readings (logger codes such as 65,535 W) and 375 outages, the longest 41.6 days. After cleaning, the 1-minute series matches the official cleaned file with correlation 0.991.
-- **The UNIX column is not always UTC.** Raw files hold UK local time. The clean files are UTC until September 2014 and local time after it. This was found by lining up raw and clean files week by week, it is fixed in `common.uk_time()`, and it matters for every hour-of-day result.
-- **The cleaned files still needed checking.**
-  - Outages were hidden as frozen flat lines (11.7% of House 3's minutes).
-  - House 5's washing-machine monitor got stuck.
-  - House 11's monitor went dead for its last nine weeks, and reads more than the whole house when heating.
-  - All of these are detected and excluded.
-- **What a wash looks like.** 2,019 washes in five homes: a typical one lasts 64 minutes and uses 0.45 kWh. 95% heat their own water, and the heater is 76% of all washing-machine energy. Only 13.0% of that energy falls in the 16:00-19:00 peak, about the window's 12.5% share of the day.
-- **The model.** LightGBM on 20 backward-looking aggregate features reaches F1 0.41 on later months of known homes, against 0.17 for an hourly-profile baseline and 0 for always-off. On homes it has never seen, F1 is 0.33. Energy totals land within 20% in four of five homes. The model misses most of House 5's washer-dryer drying runs, and its false alarms cluster around kettles, dishwashers and night-time water heating.
-- **Recommendation.** Target households that wash hot, since heating is three quarters of the energy and the model sees it best, rather than trying to shift washing out of the peak.
+The write-ups are:
 
-## Repository layout
+- [DATA.md](DATA.md): raw data and cleaning
+- [RESULTS.md](RESULTS.md): EDA and model results
+- [Recommendation.md](Recommendation.md): a one-page summary for a utility, plus the Section 4 answers
+
+Main results:
+
+- Raw House 1 has 8.5 million rows in two overlapping files. That includes 1.2 million duplicate timestamps, 3,276 impossible readings and 375 outages, the longest being 41.6 days. My cleaned 1-minute version matches the official cleaned file with a correlation of 0.991.
+- The UNIX timestamps are not UTC everywhere. The raw files are in UK local time, and the official cleaned files switch from UTC to local time in October 2014. This showed up because my cleaned data and the official data were exactly one hour apart in summer 2014. `uk_time()` handles it.
+- There are 2,019 washes across the five homes. A typical wash takes 64 minutes and uses 0.45 kWh, and 76% of that energy goes into heating water. Only 13% of washing energy falls in the 16:00-19:00 peak.
+- On later months of the same homes the model's on/off F1 is 0.41. The hourly profile baseline gets 0.17 and always-off gets 0. On homes the model has never seen, F1 is 0.33.
+
+## Data used
+
+- Dataset: REFIT Electrical Load Measurements from the University of Strathclyde. It has 20 homes in the Loughborough area, recorded from October 2013 to July 2015. Each home has a clamp on the mains (the aggregate) and 9 plug monitors.
+- Part 1 uses raw House 1: `RAW_House1_Part1.csv` and `RAW_House1_Part2.csv` from `REFIT_RAW_081116.7z`. They cover 9 October 2013 to 10 July 2015.
+- Parts 2 and 3 use the official cleaned files `CLEAN_House1.csv`, `CLEAN_House2.csv`, `CLEAN_House3.csv`, `CLEAN_House5.csv` and `CLEAN_House11.csv`. They run from September 2013 to July 2015, except House 11, which starts in June 2014. The washing machine channel for each house comes from `CLEAN_READ_ME_081116.txt`.
+- Sampling interval: about 8 seconds, because the logger polled every 6-8 s. I resample everything to 1-minute means.
+- Units: active power in watts. Energy is in kWh, calculated as the sum of 1-minute watts divided by 60,000.
+- Limitations:
+  - outages, including about six weeks in early 2014;
+  - sensors that are not synchronised;
+  - monitors that got stuck, went silent or were moved;
+  - timestamps that are not consistent;
+  - House 5's machine is a washer-dryer.
+
+  DATA.md has the details.
+
+## Setup and run instructions
+
+I used Python 3.13 on Windows, with pandas 3.0.5 and LightGBM 4.7.0. Python 3.11 or newer should work.
 
 ```
-src/
-  common.py                  paths, house/channel mapping, timestamps, cycle rule, shared helpers
-  clean_house1.py            Part 1: raw House 1 audit, cleaning, 1-minute resample
-  eda_washing_machine.py     Part 2: washing-machine EDA on the cleaned data
-  train_disaggregation.py    Part 3: features, baselines, LightGBM, evaluation, failure analysis
-outputs/
-  figures/                   every plot used in the Markdown files
-  tables/                    csv version of every table
-data/                        not committed; the REFIT files go here (see Setup)
-```
-
-## Setup
-
-Tested with Python 3.13 on Windows 11 (pandas 3.0.5, numpy 2.5.1, LightGBM 4.7.0, matplotlib 3.11.1). Python 3.11 or newer should work.
-
-```
-python -m venv .venv
-.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-On Linux or macOS, activate with `source .venv/bin/activate`.
+The data is not in the repo.
 
-The data is not in the repository:
+- Raw: download `REFIT_RAW_081116.7z` from the [REFIT dataset page](https://pureportal.strath.ac.uk/en/datasets/refit-electrical-load-measurements/). The portal has a browser check, so use a browser. Then extract `RAW_House1_Part1.csv` and `RAW_House1_Part2.csv` with 7-Zip.
+- Cleaned: get `CLEAN_House1/2/3/5/11.csv`. You can take them from the creators' [Zenodo upload](https://doi.org/10.5281/zenodo.5063428), which has one file per house with MD5 checksums, or from `CLEAN_REFIT_081116.7z`. The Zenodo copy only has Houses 1-5 and 11, which is why I picked these five.
 
-1. **Raw data.** Download `REFIT_RAW_081116.7z` (about 670 MB) from the [REFIT dataset page](https://pureportal.strath.ac.uk/en/datasets/refit-electrical-load-measurements/) in a browser; the portal blocks scripted downloads. Extract `RAW_House1_Part1.csv` and `RAW_House1_Part2.csv` into `data/raw/` with 7-Zip.
-2. **Cleaned data.** Download `CLEAN_House1.csv`, `CLEAN_House2.csv`, `CLEAN_House3.csv`, `CLEAN_House5.csv` and `CLEAN_House11.csv` into `data/clean/`. The creators publish them one by one on [Zenodo](https://doi.org/10.5281/zenodo.5063428) with MD5 checksums. The same files are inside `CLEAN_REFIT_081116.7z` on the Strathclyde portal. The Zenodo copy has Houses 1-5 and 11, which is why these five homes were picked.
-3. **Other locations.** Subfolders are fine, because the scripts search for the files. If the data is somewhere else, pass `--data-dir PATH` to each script, where PATH is the folder that contains `raw/` and `clean/`.
-
-## Run
+Put the files in `data/raw/` and `data/clean/`. Subfolders are fine. If you keep them somewhere else, pass `--data-dir`:
 
 ```
-python src/clean_house1.py
-python src/eda_washing_machine.py
-python src/train_disaggregation.py
+python src/clean_house1.py --data-dir C:/refit_data
+python src/eda_washing_machine.py --data-dir C:/refit_data
+python src/train_disaggregation.py --data-dir C:/refit_data
 ```
 
-Each script prints its numbers and writes figures to `outputs/figures/` and tables to `outputs/tables/`. They are independent: Part 1 uses the raw data, and Parts 2 and 3 use the official cleaned data. Run time on a 16-core laptop is about 1 minute for the cleaning, 25 seconds for the EDA and 1.5 minutes for the model (six LightGBM fits).
+Each script prints its numbers and saves its figures and tables to `outputs/`. The three take about 3 minutes in total on my laptop, and they give the same numbers on every run.
 
-## What I built and why
+## Preprocessing decisions
 
-**Timestamps.** The readme calls the UNIX column UTC, but the data says otherwise:
+Timestamps: raw UNIX values are read as UK local time. Cleaned values are read as UTC before 1 October 2014 and as local time after that. The hour that repeats when the clocks go back is dropped. The evidence is in DATA.md.
 
-- **Raw files hold UK local clock time.** There is a one-hour gap at every spring clock change and a one-hour step back in autumn.
-- **Clean files switch convention.** They are UTC until 30 September 2014, when the first logging database ends, and local time after it. This was found by lining up raw and clean files week by week in all five homes.
-- **One helper handles both.** `uk_time()` in `common.py` converts each file correctly. After the fix, my cleaned House 1 lines up with the official file with no offset in every month that can be tested, and the model's F1 went up slightly because the hour-of-day feature became consistent.
+Cleaning the raw House 1 data (Part 1):
 
-**Cleaning (Part 1).**
+1. Sort by time and average rows that share a timestamp. Most of them are exact copies.
+2. Set these to missing:
+   - negative values;
+   - an aggregate above 25 kW, since a 100 A main fuse tops out at about 23 kW;
+   - a plug monitor above 4 kW, since 13 A sockets top out at about 3.1 kW (this is also the official cleaning's cut-off);
+   - an aggregate of exactly 0 W, because Part1 uses 0 to mean "sensor not available".
+3. Resample to 1-minute means.
+4. Forward fill gaps of up to 5 minutes. REFIT only logs when the load changes, so a short gap usually means nothing changed. Longer gaps stay missing and get an `is_outage` flag, so I'm not inventing data.
 
-- Sort by time and average readings that share a timestamp.
-- Set physically impossible values to missing: negative power, an aggregate above 25 kW, a plug monitor above 4 kW, and an aggregate of exactly 0 W.
-- Take the 1-minute mean, forward-fill gaps of up to 5 minutes, and leave longer gaps missing with an `is_outage` flag.
+Extra checks on the cleaned files (Parts 2 and 3). A minute is dropped when:
 
-DATA.md gives the reason for each threshold. I did not try to copy everything the official pipeline does, such as re-mapping plug monitors that householders moved. Instead, the script compares my cleaned House 1 with the official file minute by minute.
+- the aggregate is frozen on one exact value for an hour or more;
+- the washing machine monitor is stuck on an "on" value;
+- the monitor has been silent for 4 or more weeks;
+- more than half of the minute's readings carry the readme's Issues flag.
 
-**Checks on the official cleaned data (Parts 2 and 3).** The cleaned files forward-fill gaps, so problems show up as flat lines rather than holes. Four checks were added, each because the data showed the problem:
+Cycle rule: the machine counts as on at 20 W or more. On-periods with gaps of up to 15 minutes are joined, to cover soak and drain pauses. A cycle must last at least 15 minutes and use at least 0.05 kWh.
 
-- an aggregate frozen at one exact value for 60+ minutes;
-- a washing-machine monitor stuck at one exact "on" value for 60+ minutes;
-- a monitor silent for 4+ weeks while the house is still measured;
-- minutes where most readings carry the readme's Issues flag.
-
-These minutes are left out of cycle detection, training and scoring.
-
-**Cycle rule (Part 2).** A plain `power > threshold` rule cuts one wash into many pieces, because the drum stops while the machine soaks, drains and refills, and the power falls to a few watts. The rule used:
-
-- the machine is on at 20 W or more;
-- on-periods separated by a pause of 15 minutes or less belong to the same cycle;
-- a cycle has to last at least 15 minutes and use at least 0.05 kWh.
-
-RESULTS.md shows how the number of cycles changes with the allowed pause.
-
-**Model (Part 3).** LightGBM regression predicting the washing machine's 1-minute power from 20 features of the aggregate signal only:
+Model features: 20 features, all from the aggregate. They are:
 
 - the current value;
-- mean, min, max and standard deviation over the last 5, 15, 30 and 60 minutes;
+- the mean, min, max and standard deviation over the last 5, 15, 30 and 60 minutes;
 - the 1-minute and 5-minute change;
 - the hour of day.
 
-Why this setup:
+All windows look backwards only.
 
-- **Gradient-boosted trees are a practical fit.** They train in minutes on a laptop CPU, need no scaling, handle the non-linear pattern (a ~2 kW block followed by an hour of motor noise) well, and their feature importances are easy to explain.
-- **Every window looks backwards only,** so the same model could run on a live feed.
-- **Small predictions are set to 0.** A regression model hedges with small values when it is unsure, so predictions below a floor (20 to 300 W, picked on the validation data) become 0.
+## Validation design
 
-**Baselines.**
+Model: LightGBM regression. I picked it because it trains in a minute or two on a laptop, needs no scaling, and its feature importances are easy to explain. Predictions below a floor are set to zero, because a regression model tends to predict small non-zero values when it's unsure. The floor is chosen on the validation set, and it came out at 20 W.
 
-- *Always off* predicts 0 W everywhere. The machine is off in 94-98% of minutes, so this baseline gets the smallest overall MAE of all three methods. That is why MAE alone is not enough.
-- *Hourly profile* predicts the average washing-machine power for each hour of the day, learned on the training period.
+Baselines:
 
-**Validation.** There is no random split, because neighbouring minutes are almost identical and a random split would put near-copies of test rows into training. Two splits are used instead:
+- always-off (0 W);
+- an hourly profile, which is the average washing machine power for each hour of the day in the training period.
 
-- *Chronological.* Each house is split by time: the first 70% of its usable minutes for training, the next 15% for validation (early stopping and the output floor) and the last 15% for testing. One model is trained on the five houses together. This answers "does it keep working for a known home in later months?".
-- *Leave one house out.* For each house, a model is trained on the other four houses only and tested on the same test months of the held-out house. This answers "does it work for a new customer with no sub-metered history?", which is the realistic case for a utility.
+Splits: I didn't use a random split. Neighbouring minutes are nearly identical, so a random split would put almost the same rows into train and test and the score would mostly measure memory. I used two splits instead:
 
-The features use only the aggregate, never the washing-machine signal, and they only look back in time, so training rows never contain information from the test period. Both setups are scored on exactly the same test minutes, so their numbers can be compared directly.
+- Time split per house. The first 70% of each house's usable minutes is for training, the next 15% for validation (early stopping and the floor), and the last 15% for testing. One model is trained on all five houses. This answers: does it keep working on later months of a known home?
+- Leave one house out. Train on four houses and test on the fifth house's test period. This answers: does it work for a new customer with no sub-metered history?
 
-**Metrics.**
+How this avoids leakage:
 
-- *MAE (W)* is the standard error, but most of it comes from the many minutes when the machine is off.
-- *MAE while running* (true power at least 20 W) shows how well the power level is tracked when it matters.
-- *On/off precision, recall and F1 at 20 W* show whether the model knows *when* the machine runs.
-- *Energy error (%)* compares predicted and true kWh over the test period, which is what a bill breakdown would show.
+- the features use only the aggregate, never the washing machine signal;
+- every window looks back in time, so no training row sees anything from the test period;
+- the validation set is only used for early stopping and the floor;
+- the test set is used once.
+
+Both splits are scored on exactly the same test minutes.
+
+Metrics:
+
+- overall MAE;
+- MAE only while the machine is really on (20 W or more), because that's when the power level matters;
+- on/off precision, recall and F1 at 20 W, which tell you whether the model knows when the machine runs;
+- the error in total energy (predicted vs true kWh), which is what a bill breakdown would show.
+
+Overall MAE on its own is misleading here. The machine is off 94-98% of the time, so always-off gets the best MAE of the three methods.
 
 ## Assumptions
 
-- **Channel mapping.** The readme's mapping holds for the whole period. The readme warns that occupants may have moved monitors. For House 1, every raw channel matches the official cleaned file closely, but other houses were not checked channel by channel.
-- **Ground truth.** The washing-machine plug monitor is the ground truth, since it sees only that appliance. House 5's machine (AEG L99695HWD) is a washer-dryer, so its channel includes drying runs.
-- **Time.** Times are UK local time after the timestamp fix. Hour-of-day and day-of-week use local time, because people follow the local clock.
-- **Resolution.** 1-minute means are detailed enough for this task. Peak power figures are the highest 1-minute mean, not the instantaneous peak.
+- The channel mapping in the readme is right for the whole period.
+- The washing machine plug monitor is the ground truth. House 5's machine (AEG L99695HWD) is actually a washer-dryer, so its channel includes drying.
+- All times are UK local time after the timestamp fix. Hour of day and day of week use local time, because that's the clock people live by.
+- 1-minute averages are good enough for this task. "Peak power" means the highest 1-minute average.
 
 ## Trade-offs
 
-- **Trees on window features vs a sequence model such as seq2point.** Trees are quicker to train, explain and debug. They only see the last hour as summary statistics, though, so they cannot learn the full shape of a 90-minute cycle.
-- **Backward-looking windows.** They are leak-free by construction and usable in near real time, but the first minutes of a cycle are harder to catch than with a centred window.
-- **Forward fill vs interpolation for short gaps.** Forward fill matches how REFIT logs data (only when the load changes) and never invents a ramp. The cost is that a stale value can be held for up to 5 minutes.
-- **Dropping frozen, stuck, silent and mostly-flagged minutes from training and scoring.** This gives cleaner labels, but the evaluation skips some hard periods. For example, two thirds of House 11's heater minutes are dropped, because its monitor reads more than the whole house.
-- **One plug limit for all monitors (4 kW).** It is simple and matches the official cleaning, but it lets through glitches that are too big for a fridge yet under 4 kW.
-- **Five houses.** This is one more than the brief asks for and still runs in minutes, but five leave-one-house-out folds are a small sample of "new customers".
+- A tree model on window statistics is easy to train and explain. But it only sees the last hour as summaries, so it can't learn the full shape of a 90-minute cycle the way seq2point could.
+- Backward-only windows can't leak and would work in real time. The cost is that the start of a cycle is harder to catch. In a quick side test that isn't in the scripts, adding forward windows raised F1 from 0.41 to 0.44.
+- Forward filling short gaps matches how REFIT logs data, but it can hold a stale value for up to 5 minutes.
+- Dropping frozen, stuck and flagged minutes gives cleaner labels, but the evaluation then skips some hard periods. For example, two thirds of House 11's heating minutes are dropped.
+- Using one 4 kW limit for all plug monitors keeps things simple, but it lets through glitches that are too high for a fridge.
+- Five houses is one more than the brief asks for, but it's still a small sample of new customers.
+
+## Possible improvements
+
+- Add forward-looking windows. This is the cheapest gain (see above).
+- Try seq2point on the same splits and metrics.
+- Use all 18 houses that have a single washing machine for the leave-one-house-out test.
+- Score whole washes (found, missed and false) instead of minutes, because that's how a customer thinks about it.
+- Rerun the model on 15- and 30-minute data to measure the drop.
+- Add per-appliance glitch limits, and check the other houses for monitors that were moved.
 
 ## AI tools used
 
-I used Claude (an AI assistant) as a coding and writing aid: it helped write and debug the pandas, LightGBM and matplotlib code and tidy the wording of these Markdown files. I set the analysis design (cleaning rules and gap thresholds, the cycle rule, the time-based and leave-one-house-out splits, the metrics). Every number in these reports comes straight from the scripts' output and can be reproduced with the three commands above.
-
-## What I would do next
-
-1. **Add forward-looking windows for offline use.** A quick side test (not in the scripts) with the next 15, 30 and 60 minutes raised chronological F1 from 0.41 to 0.44, so this is the cheapest next gain.
-2. **Train a seq2point CNN** on the same splits and metrics, to see whether the extra complexity pays off.
-3. **Use more homes for leave-one-house-out.** All 18 houses with a single washing machine would give a real spread of "new customer" results.
-4. **Score at the event level** (matched, missed and invented washes), because utilities and customers think in washes, not minutes.
-5. **Measure the coarse-data drop.** Re-run the model with the aggregate averaged to 15 and 30 minutes, to measure the drop discussed in Recommendation.md.
-6. **Add per-appliance glitch limits**, and compare every house's raw channels with the official cleaned file month by month to find monitors that were moved.
+I used Claude as a coding assistant to help write and debug the pandas, LightGBM and matplotlib code, and to tidy the wording of these docs. The analysis design is mine: the cleaning rules, the gap thresholds, the cycle rule, the two validation splits and the metrics. Every number here comes from the scripts' output, and you can reproduce it with the commands above.
 
 ## References
 
-- Murray, D., Stankovic, L., Stankovic, V. (2017). An electrical load measurements dataset of United Kingdom households from a two-year longitudinal study. *Scientific Data* 4, 160122. Used for the sensor setup and known data issues.
-- Murray, D., Liao, J., Stankovic, L., et al. (2015). A data management platform for personalised real-time energy feedback. *EEDAL 2015*. This is the citation requested by the dataset readme.
-- Kelly, J., Knottenbelt, W. (2015). Neural NILM: deep neural networks applied to energy disaggregation. *ACM BuildSys '15*. Source of the 20 W on-threshold for washing machines, and of the idea of joining short off-periods and dropping short activations. The pause and minimum length here are adapted to 1-minute data and checked in RESULTS.md.
-- Zhang, C., Zhong, M., Wang, Z., Goddard, N., Sutton, C. (2018). Sequence-to-point learning with neural networks for non-intrusive load monitoring. *AAAI-18*. Three ideas come from here:
-  - predicting the appliance at one time point from a window of the aggregate (the rolling features are a tabular version of this);
-  - MAE plus total-energy error as metrics;
-  - testing on REFIT houses not seen in training.
-- Makonin, S., Popowich, F. (2015). Nonintrusive load monitoring (NILM) performance evaluation. *Energy Efficiency* 8, 809-814. Explains why accuracy-style metrics mislead when an appliance is off most of the time, and why detection and energy estimation should be reported separately.
-- Precioso, D., Gomez-Ullate, D. (2020). NILM as a regression versus classification problem: the importance of thresholding. arXiv:2010.16050. Shows that the on/off threshold applied to a regression output changes the classification scores, which is why the floor here is chosen on validation and not on test.
+- Murray, Stankovic and Stankovic (2017), An electrical load measurements dataset of United Kingdom households from a two-year longitudinal study, Scientific Data 4:160122. This is the dataset paper.
+- Murray et al. (2015), A data management platform for personalised real-time energy feedback, EEDAL 2015. This is the citation the dataset readme asks for.
+- Kelly and Knottenbelt (2015), Neural NILM: deep neural networks applied to energy disaggregation, BuildSys '15. I took the 20 W on-threshold for washing machines from here, along with the idea of joining short off-periods into one activation.
+- Zhang et al. (2018), Sequence-to-point learning with neural networks for non-intrusive load monitoring, AAAI-18. My window features are a simple version of their window-to-point idea. I also took MAE plus energy error as metrics, and testing on REFIT houses that weren't used in training.
+- Makonin and Popowich (2015), Nonintrusive load monitoring (NILM) performance evaluation, Energy Efficiency 8. This is why I report detection (F1) and energy separately, instead of an accuracy-type score that looks good when the appliance is mostly off.
+- Precioso and Gomez-Ullate (2020), NILM as a regression versus classification problem: the importance of thresholding, arXiv:2010.16050. This is why the on/off floor is picked on validation rather than on test.
